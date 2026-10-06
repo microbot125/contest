@@ -1,0 +1,648 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>결제 흐름 시연</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* 레이아웃: 왼쪽에서 오른쪽으로 흐르는 3구역 관제판 — 1페이지의 에이전트 판단 카드들이 2페이지 넓은 엔진의 버퍼로 모이고, 엔진과 스케줄러가 입력·출력 두 줄로 주고받는다 */
+:root{
+  --bg:#edf0f3; --panel:#ffffff; --panel-2:#f6f8fa; --ink:#13242c; --muted:#5b6b74; --line:#cfd6dc;
+  --flow:#3546c9; --flow-soft:#e4e7fb;
+  --due:#0b7561; --due-soft:#dff3ee; --latent:#9a5b00; --latent-soft:#fbeed6; --bad:#b3261e; --bad-soft:#fbe4e1;
+  --engine:#13242c; --engine-ink:#f2f5f7; --engine-muted:#9fb0b9; --engine-line:#34474f; --e-node:#22353d;
+  --e-ok:#4fd1b5; --e-bad:#ff8672; --e-hot:#aab3ff; --folder:#f0c35a; --folder-ink:#231900;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0e161a; --panel:#172329; --panel-2:#1d2b32; --ink:#e9eef1; --muted:#96a6ae; --line:#31424a;
+  --flow:#8f9bff; --flow-soft:#252c5c;
+  --due:#4fd1b5; --due-soft:#12362f; --latent:#f0b352; --latent-soft:#3a2c10; --bad:#ff9a8a; --bad-soft:#47201b;
+  --engine:#060b0d; --engine-line:#2a3a41; --e-node:#16242a; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0e161a; --panel:#172329; --panel-2:#1d2b32; --ink:#e9eef1; --muted:#96a6ae; --line:#31424a;
+  --flow:#8f9bff; --flow-soft:#252c5c;
+  --due:#4fd1b5; --due-soft:#12362f; --latent:#f0b352; --latent-soft:#3a2c10; --bad:#ff9a8a; --bad-soft:#47201b;
+  --engine:#060b0d; --engine-line:#2a3a41; --e-node:#16242a; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5}
+.wrap{max-width:1480px;margin:0 auto;padding-inline:24px;padding-block:24px 40px;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between}
+h1{font-size:26px;font-weight:700;margin:0;letter-spacing:-.01em}
+header p{margin:4px 0 0;color:var(--muted);max-width:66ch}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:7px 14px;font-weight:500}
+button:hover{border-color:var(--flow)}
+button:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--flow);outline-offset:2px}
+button.primary{background:var(--flow);border-color:var(--flow);color:var(--panel)}
+button:disabled{opacity:.45;cursor:default}
+
+.stage{position:relative;display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);column-gap:60px;align-items:stretch}
+#wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+#wires path{fill:none;stroke:var(--line);stroke-width:2;transition:stroke .2s}
+#wires path.on{stroke:var(--flow);stroke-width:2.5}
+#wires marker path{fill:var(--muted);stroke:none}
+#wires text{fill:var(--muted);font-family:var(--sans);font-size:12px;font-weight:600;text-anchor:middle}
+#wires circle{fill:var(--flow)}
+
+.zone-label{font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--muted)}
+.pages{display:flex;gap:8px;flex-wrap:wrap}
+.pages button{display:flex;gap:8px;align-items:center;color:var(--muted);background:none}
+.pages button span{font-family:var(--mono);font-size:12.5px;width:22px;height:22px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center}
+.pages button[aria-current]{color:var(--ink);background:var(--panel);border-color:var(--ink);font-weight:600}
+.pages button[aria-current] span{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+#page1{display:flex;flex-direction:column;gap:18px}
+.pages{align-items:center} .keyhint{color:var(--muted);font-size:13px;margin-left:6px}
+.pay{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:28px;align-items:start}
+.proc{display:flex;flex-direction:column;gap:14px;min-width:0}
+.p3-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.balrow{font-size:13.5px;color:var(--muted)} .balrow b{font-family:var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+.prow{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:4px 10px;align-items:baseline;font-size:13.5px;transition:opacity .2s,border-color .2s}
+.prow .ord{font-family:var(--mono);font-size:12px;color:var(--muted);width:1.4em}
+.prow .d,.prow .a{font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.prow .t{overflow-wrap:anywhere} .prow .who{display:block;font-size:12px;color:var(--muted)}
+.prow .foot{grid-column:3 / -1;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.chip{font-size:11.5px;font-weight:600;padding:1px 9px;border-radius:99px;background:var(--panel-2);color:var(--muted);border:1px solid var(--line)}
+.st-paying{border-color:var(--flow);box-shadow:0 0 0 3px var(--flow-soft)} .st-paying .chip{background:var(--flow-soft);color:var(--flow);border-color:transparent}
+.st-paid .chip{background:var(--due-soft);color:var(--due);border-color:var(--due)}
+.st-fail{border-color:var(--bad)} .st-fail .chip{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+.st-cancel .chip{background:var(--latent-soft);color:var(--latent);border-color:transparent}
+.st-temp{opacity:.55} .st-temp .t{text-decoration:line-through} .st-temp .chip{background:var(--flow-soft);color:var(--flow);border-color:transparent}
+.failt{font-size:12.5px;color:var(--muted);display:flex;gap:4px;align-items:center;cursor:pointer}
+.pbox{border:1.5px dashed var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}
+.pbox.on{border-style:solid;border-color:var(--ink)}
+.pbox .ttl{font-weight:700;font-size:16px} .pbox p{margin:0;font-size:13.5px} .pbox .muted{color:var(--muted)}
+.pbox .blocked{color:var(--bad)} .pbox .blocked s{text-decoration-thickness:2px} .pbox .found{color:var(--due);font-weight:600}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.tchip{font-family:var(--mono);font-size:12.5px;padding:3px 9px;border-radius:6px;background:var(--flow-soft);color:var(--flow)}
+.tchip.bad{background:var(--bad-soft);color:var(--bad);text-decoration:line-through} .tchip.new{background:var(--due-soft);color:var(--due)}
+.parrow{text-align:center;color:var(--muted);font-size:18px;line-height:1}
+.pbox button{align-self:flex-start}
+.lane-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px}
+.lane{display:flex;flex-direction:column;gap:8px}
+.lane .top b{font-size:15.5px}
+.lane .meta{display:flex;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;align-items:center}
+.lane .err:empty{display:none}
+.p1-actions{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}
+button.big{font-size:17px;padding:10px 28px;font-weight:600}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:0;font-size:14px}
+.lane textarea{width:100%;min-height:0;resize:vertical;font:inherit;line-height:1.4;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.err{color:var(--latent);font-size:12.5px}
+.agent{display:flex;flex-direction:column;gap:4px;transition:border-color .2s, box-shadow .2s}
+.agent.busy{border-color:var(--flow);box-shadow:0 0 0 3px var(--flow-soft)}
+.agent .top{display:flex;gap:6px;align-items:flex-start}
+.agent b{font-weight:600;overflow-wrap:anywhere;flex:1;min-width:0}
+.agent small,.prio{color:var(--muted);font-size:12.5px}
+.prio input{font:inherit;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:0 4px;max-width:100%}
+.prio select{font:inherit;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:0 2px;max-width:100%}
+.ltr{font-family:var(--mono);font-weight:600;background:var(--ink);color:var(--panel);border-radius:4px;padding:0 5px;line-height:1.5}
+.x{border:none;background:none;padding:0 2px;color:var(--muted);font-size:16px;line-height:1}
+.pill{align-self:flex-start;font-size:11px;font-weight:600;padding:1px 8px;border-radius:99px;background:var(--panel-2);color:var(--muted);border:1px solid var(--line)}
+.pill.busy{background:var(--flow-soft);color:var(--flow);border-color:transparent}
+.pill.done{background:var(--due-soft);color:var(--due);border-color:transparent}
+.pill.bad{background:var(--latent-soft);color:var(--latent);border-color:transparent}
+.add{border-style:dashed}
+
+/* 엔진 */
+.engine{background:var(--engine);color:var(--engine-ink);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.engine h2,.sched h2{font-size:19px;margin:2px 0 0;font-weight:700}
+.engine .zone-label{color:var(--engine-muted)}
+.buf,.trash{border:1px dashed var(--engine-line);border-radius:8px;padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
+.buf{min-height:118px;transition:border-color .2s} .buf.full{border-style:solid;border-color:var(--e-hot)}
+.box-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.box-head span:last-child{font-family:var(--mono);font-size:12.5px;color:var(--engine-muted)}
+.folders{display:flex;flex-wrap:wrap;gap:14px 10px;align-items:flex-start}
+.fwrap{width:88px;display:flex;flex-direction:column;gap:4px}
+.fwrap small{font-size:11px;line-height:1.3;color:var(--e-bad)}
+.folder{position:relative;width:88px;margin-top:8px;padding:5px 8px 7px;border-radius:0 6px 6px 6px;background:var(--folder);color:var(--folder-ink);display:flex;flex-direction:column;line-height:1.2;transition:transform .15s, box-shadow .15s}
+.folder::before{content:"";position:absolute;left:0;top:-8px;width:40px;height:9px;background:var(--folder);border-radius:5px 9px 0 0}
+.folder b{font-family:var(--mono);font-size:20px;font-weight:600}
+.folder span{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.folder.new{animation:drop .45s ease-out}
+.folder.scan{transform:translateY(-4px);box-shadow:0 0 0 3px var(--engine-ink)}
+.folder.bad{--folder:var(--e-bad)} .folder.pick{--folder:var(--e-ok)} .folder.hold{--folder:var(--e-hot)}
+@keyframes drop{0%{transform:translateX(-18px);opacity:0}100%{transform:none;opacity:1}}
+.e-hint{color:var(--engine-muted);font-size:13px;margin:0}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;counter-reset:s}
+.steps li{counter-increment:s;border:1px solid var(--engine-line);border-radius:8px;padding:9px 12px 9px 44px;position:relative;color:var(--engine-muted);transition:border-color .2s,color .2s;min-width:0}
+.steps li::before{content:counter(s);position:absolute;left:11px;top:9px;width:23px;height:23px;border-radius:50%;border:1px solid var(--engine-line);display:grid;place-items:center;font-family:var(--mono);font-size:12.5px}
+.steps li.on{border-color:var(--e-hot);color:var(--engine-ink)} .steps li.on::before{background:var(--e-hot);border-color:var(--e-hot);color:var(--engine)}
+.steps li.done{color:var(--engine-ink)} .steps li.done::before{background:var(--e-ok);border-color:var(--e-ok);color:var(--engine)}
+.steps .ttl{font-weight:600}
+.steps .res{font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--e-ok);overflow-wrap:anywhere}
+.ask{margin-top:10px;border:1px solid var(--e-hot);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px;color:var(--engine-ink);background:var(--e-node)}
+.ask .acts{display:flex;gap:8px;flex-wrap:wrap}
+.ask button{background:var(--e-hot);border-color:var(--e-hot);color:var(--engine);font-weight:600}
+.ask button+button{background:none;color:var(--engine-ink);border-color:var(--engine-muted)}
+.ask small{color:var(--engine-muted);font-size:12.5px}
+.graph{overflow-x:auto;margin-top:8px}
+.graph svg{display:block;width:100%;min-width:320px;height:auto}
+.graph text{font-family:var(--sans);font-size:12px;fill:var(--engine-muted);text-anchor:middle}
+.graph .n rect{fill:var(--e-node);stroke:var(--engine-line)} .graph .n text{fill:var(--engine-ink);font-family:var(--mono);font-size:12.5px}
+.graph .e{stroke:var(--engine-line);stroke-width:1.5}
+.graph .e.act{stroke:var(--e-hot);stroke-width:3} .graph .n.act rect{stroke:var(--e-hot);stroke-width:2.5}
+.graph .e.fin{stroke:var(--e-ok);stroke-width:3.5} .graph .n.fin rect{fill:var(--e-ok);stroke:var(--e-ok)} .graph .n.fin text{fill:var(--engine)}
+.graph .dim{opacity:.35}
+.graph .n.bundle rect{stroke-dasharray:5 3;stroke:var(--engine-muted)} .graph .n.bundle.act rect,.graph .n.bundle.fin rect{stroke-dasharray:none}
+.graph .n .sub{font-family:var(--sans);font-size:10.5px;fill:var(--engine-muted)} .graph .n.fin .sub{fill:var(--engine)}
+
+/* 스케줄러 */
+.sched{border:2px solid var(--ink);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:14px;background:var(--panel);min-width:0}
+.bal{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
+.bal input{font:inherit;font-family:var(--mono);width:6.5em;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);color:var(--ink)}
+.sub{border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px;flex:1}
+.sub.due{background:var(--due-soft)} .sub.latent{background:var(--latent-soft)}
+.sub-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.sub.due h3{color:var(--due)} .sub.latent h3{color:var(--latent)}
+.sub h3{margin:0;font-size:16px;font-weight:700}
+.sum{font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
+.hint{font-size:13px;color:var(--muted);margin:0}
+.item{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.item.new{animation:pop 1.2s ease-out}
+@keyframes pop{0%{box-shadow:0 0 0 4px var(--flow)}100%{box-shadow:0 0 0 0 transparent}}
+.item>button{width:100%;border:none;border-radius:0;background:none;text-align:left;padding:8px 10px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:baseline;font-size:13.5px}
+.item .d,.item .a{font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.item .t{overflow-wrap:anywhere}
+.item .who{display:block;font-size:12px;color:var(--muted)}
+.detail{border-top:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--panel-2);font-size:13px}
+.detail .acts,.detail .fields{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.detail input{font:inherit;width:8.5em;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
+.detail button{padding:4px 10px;font-size:13px}
+.bundle{border:1.5px dashed var(--ink);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px}
+.bundle-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;font-weight:600;padding:0 4px}
+.empty{color:var(--muted);font-size:13.5px;padding:6px 2px}
+.vflow{display:none;text-align:center;color:var(--muted);font-weight:600;font-size:13px;padding:8px 0}
+footer{color:var(--muted);font-size:13px;max-width:110ch}
+footer ul{margin:4px 0 0;padding-left:18px}
+
+@media (max-width:1100px){
+  .stage,.pay{grid-template-columns:minmax(0,1fr)}
+  #wires{display:none} .vflow{display:block}
+}
+@media (max-width:480px){ .wrap{padding-inline:16px} }
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>결제 흐름 시연</h1>
+      <p>1페이지에서 판단을 고쳐 <b>실행</b>하면 2페이지에서 엔진이 요청을 한 번에 처리하고, 3페이지 결제과정에서 등록된 결제를 실제로 집행하는 과정을 봅니다.</p>
+    </div>
+    <div class="tools">
+      <button id="reset">처음으로</button>
+    </div>
+  </header>
+
+  <nav class="pages" aria-label="페이지">
+    <button id="tab1" aria-current="page"><span>1</span>에이전트 판단</button>
+    <button id="tab2"><span>2</span>엔진과 스케줄러</button>
+    <button id="tab3"><span>3</span>결제과정</button>
+    <span class="keyhint">← → 방향키로 이동</span>
+  </nav>
+
+  <section id="page1" aria-label="에이전트 판단">
+    <div id="lanes" class="lane-grid"></div>
+    <div class="p1-actions">
+      <button class="add" id="add">+ 에이전트 추가</button>
+      <button class="primary big" id="runAll">실행 →</button>
+    </div>
+  </section>
+
+  <div class="stage" id="stage" hidden>
+    <section class="engine" id="engine" aria-label="프로그램 엔진">
+      <div><span class="zone-label">모든 요청을 모아 한 번에 처리</span><h2>프로그램 엔진</h2></div>
+      <div id="engineBody" style="display:contents"></div>
+    </section>
+
+    <div class="vflow">↑ 입력(조회 결과) &nbsp;·&nbsp; 출력(등록) ↓</div>
+
+    <section class="sched" id="sched" aria-label="결제 스케줄러">
+      <div><span class="zone-label">엔진과 주고받는 곳</span><h2>결제 스케줄러</h2></div>
+      <div class="bal"><label for="bal">계좌 잔액</label><input id="bal" type="number" min="0" step="10" value="900"><span>만원</span></div>
+      <div class="sub due" id="zoneDue"></div>
+      <div class="sub latent" id="zoneLatent"></div>
+    </section>
+
+    <svg id="wires" aria-hidden="true"></svg>
+  </div>
+
+  <section id="page3" aria-label="결제과정" hidden>
+    <div class="pay">
+      <div class="sched">
+        <div><span class="zone-label">2페이지 스케줄러 복사본</span><h2>결제과정</h2></div>
+        <div class="balrow">계좌 잔액 <b id="pbal"></b></div>
+        <div class="sub due" id="payDue"></div>
+        <div class="sub latent" id="payLatent"></div>
+      </div>
+      <div class="proc">
+        <div class="p3-actions"><button class="primary big" id="payRun">실행</button><span class="hint">날짜가 빠른 순, 같은 날이면 우선순위가 높은 순으로 결제합니다.</span></div>
+        <div id="payFlow" class="proc"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>화면의 에이전트·판단 문장·금액은 모두 예시이고, 아래 판정 기준은 시연을 위해 임시로 정한 값입니다.
+    <ul>
+      <li>가용 예산 = 계좌 잔액 − 결제 예정 합계</li>
+      <li>목적: 판단 문장의 낱말로 판별하며, 에이전트에 허용된 목적이 아니면 폐기</li>
+      <li>수치: 금액이 없거나 가용 예산보다 크면 폐기</li>
+      <li>그룹: 같은 대상을 가리키는 요청끼리 한 집합으로 묶고, 집합마다 하나씩 골라 합계가 가장 작은 조합을 선택</li>
+      <li>독점적 목적: 1페이지 카드에서 표시한 요청은 같은 재화의 요청이 있어도 중복·배타로 묶지 않고 혼자 한 집합(독립 집합)이 되어 조합에 반드시 포함. 출장 묶음에도 들어가지 않음</li>
+      <li>묶음: 출장 목적의 요청(항공권·기차표·숙박)은 함께만 결제되므로 한 덩어리 선택지로 묶어 비교</li>
+      <li>등록: 우선순위가 높은 요청부터 예산에 배정. 넣으면 예산을 넘는 요청이 나오면 엔진이 멈추고 묻습니다: 그 요청만 잠재 작업 구역으로 보내고 아래 우선순위를 계속 볼지, 거기서 잘라 아래 요청까지 모두 잠재 작업 구역으로 보낼지. 묶음은 통째로 이동</li>
+      <li>납부일: 1페이지 카드의 납부일 칸에서 직접 정하며, 비우면 당일 결제로 등록하고 날짜를 표시하지 않음. 판단 문장에서는 목적과 금액만 읽음</li>
+      <li>다시 실행: 1페이지에서 다시 실행하면 이전 실행이 등록한 미결제 건을 지우고 새 결과로 교체</li>
+      <li>결제과정: 날짜가 빠른 순, 같은 날이면 우선순위가 높은 순으로 결제. 실패는 각 결제의 "실패 가정" 표시로 정하며, 기본 예시는 기차표가 실패</li>
+      <li>실패 처리: 실패한 결제가 속한 묶음은 이미 결제된 것까지 취소하고, 그 묶음과 아직 결제되지 않은 더 낮은 우선순위의 추가 결제를 임시 공간으로 이동. 재탐색 결과(대체 경로와 금액)는 예시</li>
+    </ul>
+  </footer>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num=n=>n.toLocaleString('ko-KR'), won=n=>num(n)+'만원';
+const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
+const wait=ms=>new Promise(r=>setTimeout(r,reduced?0:ms));
+
+/* 목적 사전: 문장에서 먼저 발견되는 낱말이 요청의 대상이 된다 */
+const DICT=[['물품',['노트북','모니터','서버','장비','비품']],['구독',['클라우드','라이선스','구독','이용료']],
+  ['출장',['항공권','항공','기차표','기차','고속버스','버스','숙박','호텔','출장']],['광고',['광고','홍보']],['임대',['임대료','월세']],
+  ['보험',['보험']],['세금',['부가세','세금']],['송금',['코인','상품권','주식','투자','송금','이체']]];
+const BUNDLE={'출장':'출장'}; /* 이 목적의 요청은 대상이 달라도 함께만 결제된다 */
+/* 납부일: 'YYYY-MM-DD' 또는 null(당일). 오늘 이전 날짜는 당일로 본다 */
+const pad=n=>String(n).padStart(2,'0'), isoOf=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const TODAY=isoOf(new Date()), plus=n=>{ const d=new Date(); d.setDate(d.getDate()+n); return isoOf(d); };
+const norm=v=>v&&v>TODAY?v:null, dl=v=>{ if(!v)return null; const [,m,d]=v.split('-'); return `${+m}월 ${+d}일`; };
+function parse(t){
+  const a=t.match(/([\d,]+)\s*만\s*원/);
+  let cat=null,target=null;
+  for(const [c,ws] of DICT){ const w=ws.find(w=>t.includes(w)); if(w){cat=c;target=w;break;} }
+  return {amount:a?Number(a[1].replace(/,/g,'')):null, cat, target};
+}
+
+const seed=()=>({
+  n:20,
+  agents:[
+    {id:1,name:'구매 에이전트 1',prio:1,allow:['물품'],text:'노트북 대금 280만원 결제 필요'},
+    {id:2,name:'구매 에이전트 2',prio:1,allow:['물품'],text:'노트북 대금 310만원 결제 필요'},
+    {id:3,name:'구독 에이전트',prio:2,allow:['구독'],due:plus(19),text:'클라우드 이용료 400만원 납부 필요'},
+    {id:4,name:'정산 에이전트',prio:2,allow:['구독'],due:plus(19),text:'클라우드 이용료 430만원 납부 필요'},
+    {id:5,name:'출장 에이전트',prio:3,allow:['출장'],text:'출장 항공권 100만원 결제 필요'},
+    {id:10,name:'교통 에이전트',prio:3,allow:['출장'],text:'도착 후 기차표 8만원 결제 필요'},
+    {id:6,name:'일정 에이전트',prio:3,allow:['출장'],text:'코인 거래소로 500만원 송금 필요'},
+    {id:7,name:'마케팅 에이전트',prio:2,allow:['광고'],text:'광고비 90000만원 집행 필요'}
+  ],
+  items:[
+    {id:8,agent:'재무 에이전트',text:'사무실 임대료 결제',amount:300,date:plus(4),prio:1,zone:'due'},
+    {id:9,agent:'구매 에이전트 1',text:'모니터 교체 검토',amount:null,date:null,zone:'latent'}
+  ]
+});
+const freshE=()=>({buffer:[],trash:[],step:-1,res:['','','','',''],graph:null,scan:null,picked:null,held:null,ask:null,done:false});
+let S=seed(), E=freshE(), openId=null, running=false;
+const letter=a=>String.fromCharCode(65+S.agents.indexOf(a));
+
+/* ---------- 1페이지: 에이전트 판단 ---------- */
+function renderLanes(){
+  $('#lanes').innerHTML=S.agents.map(a=>`
+    <div class="lane card agent" data-id="${a.id}" id="a${a.id}">
+      <div class="top"><span class="ltr">${letter(a)}</span><b>${esc(a.name)}</b>
+      <button class="x" data-del="${a.id}" aria-label="${esc(a.name)} 삭제" title="삭제">×</button></div>
+      <label class="zone-label" for="t${a.id}">에이전트 판단</label>
+      <textarea id="t${a.id}" rows="2" placeholder="예: 보험료 50만원 결제 필요">${esc(a.text)}</textarea>
+      <span class="err" id="e${a.id}"></span>
+      <div class="meta"><small>허용 목적: ${esc(a.allow.join(', '))}</small>
+      <label class="prio" for="r${a.id}">우선순위 <select id="r${a.id}" data-prio="${a.id}">${[1,2,3].map(v=>`<option value="${v}"${a.prio===v?' selected':''}>${v}${v===1?' (높음)':v===3?' (낮음)':''}</option>`).join('')}</select></label>
+      <label class="prio" for="u${a.id}">납부일 <input type="date" id="u${a.id}" data-due="${a.id}" min="${TODAY}" value="${a.due||''}"></label>
+      <small>납부일을 비우면 당일 결제</small></div>
+      <label class="failt" for="x${a.id}"><input type="checkbox" id="x${a.id}" data-excl="${a.id}"${a.excl?' checked':''}>독점적 목적 (같은 재화가 있어도 중복으로 보지 않음)</label>
+      <span class="pill" id="p${a.id}">대기</span>
+    </div>`).join('');
+}
+function status(id,cls,txt){ const p=$('#p'+id), a=$('#a'+id); if(!p)return; p.className='pill '+cls; p.textContent=txt; a.classList.toggle('busy',cls==='busy'); }
+$('#lanes').addEventListener('input',e=>{
+  const l=e.target.closest('.lane'); if(!l)return;
+  const a=S.agents.find(x=>x.id==l.dataset.id);
+  if(e.target.dataset.prio){ a.prio=+e.target.value; return; }
+  if(e.target.dataset.due){ a.due=e.target.value; return; }
+  if(e.target.dataset.excl){ a.excl=e.target.checked; return; }
+  a.text=e.target.value; $('#e'+a.id).textContent='';
+});
+$('#lanes').addEventListener('click',e=>{
+  const d=e.target.dataset.del;
+  if(d&&!running){ S.agents=S.agents.filter(x=>x.id!=d); E=freshE(); renderLanes(); renderEngine(); }
+});
+const extra=[['보험 에이전트',['보험']],['세무 에이전트',['세금']],['시설 에이전트',['임대']],['홍보 에이전트',['광고']]];
+$('#add').onclick=()=>{
+  if(running||S.agents.length>=12)return;
+  const id=++S.n, [name,allow]=extra.find(x=>!S.agents.some(a=>a.name===x[0]))||['에이전트 '+id,['물품']];
+  S.agents.push({id,name,prio:2,allow,due:'',text:''}); E=freshE(); renderLanes(); renderEngine(); $('#t'+id).focus();
+};
+/* 페이지 전환: 위쪽 버튼 또는 ← → 방향키 */
+let page=1;
+function show(n){
+  page=n; $('#page1').hidden=n!==1; $('#stage').hidden=n!==2; $('#page3').hidden=n!==3;
+  [1,2,3].forEach(k=>k===n?$('#tab'+k).setAttribute('aria-current','page'):$('#tab'+k).removeAttribute('aria-current'));
+  if(n===2)draw();
+  if(n===3){ if(!P||P.phase!=='failed')buildPay(); renderPay(); }
+  try{ scrollTo(0,0); }catch(e){}
+}
+[1,2,3].forEach(k=>$('#tab'+k).onclick=()=>{ if(!running)show(k); });
+document.addEventListener('keydown',e=>{
+  if(running||e.altKey||e.ctrlKey||e.metaKey||/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))return;
+  if(e.key==='ArrowRight'&&page<3){ e.preventDefault(); show(page+1); }
+  if(e.key==='ArrowLeft'&&page>1){ e.preventDefault(); show(page-1); }
+});
+$('#reset').onclick=()=>{ if(running)return; S=seed(); E=freshE(); P=null; openId=null; $('#bal').value=900; renderLanes(); renderSched(); renderEngine(); show(1); };
+
+/* 실행: 2페이지로 넘어가 모든 요청을 버퍼에 넣고 엔진을 돌린다 */
+$('#runAll').onclick=async()=>{
+  if(running||!S.agents.length)return; let ok=true;
+  S.agents.forEach(a=>{ if(!a.text.trim()){ $('#e'+a.id).textContent='판단을 입력하세요'; ok=false; } });
+  if(!ok)return;
+  running=true; lock(true);
+  S.items=S.items.filter(i=>!i.req||i.zone==='paid'); renderSched(); /* 이전 실행에서 등록한 미결제 건은 새 결과로 바꾼다 */
+  S.agents.forEach(a=>status(a.id,'busy','요청 보냄')); await wait(500);
+  startEngine(S.agents.map(a=>{ const text=a.text.trim(); return {aid:a.id,agent:a.name,allow:a.allow,L:letter(a),prio:a.prio,text,...parse(text),date:norm(a.due),excl:!!a.excl}; }),false);
+};
+async function startEngine(reqs,recalc){
+  running=true; lock(true); E=freshE(); E.total=reqs.length; E.recalc=recalc; P=null;
+  show(2); renderEngine(); await wait(500);
+  for(const q of reqs){ E.buffer.push({...q,fresh:true}); renderEngine(); await wait(170); }
+  runEngine();
+}
+
+/* ---------- 가운데: 엔진 ---------- */
+const STEPS=['스케줄러 입력을 받아 예산 계산','허가되지 않은 목적 탐색 → 발견 시 폐기','수치가 비정상인 요청 탐색 → 발견 시 폐기','중복·배타 요청 그룹화 → 비용 합이 최소인 조합 탐색','선택한 조합을 스케줄러에 등록(예산 초과분은 잠재 작업), 나머지 폐기'];
+function folder(r,cls=''){
+  const lab=(r.target||r.text.slice(0,4))+' '+(r.amount?num(r.amount):'—')+(r.excl?' 독점':'');
+  const f=`<div class="folder ${cls}${r.fresh?' new':''}${E.scan&&E.scan.includes(r.L)?' scan':''}" title="${esc(r.text)}"><b>${r.L}</b><span>${esc(lab)}</span></div>`;
+  r.fresh=false; return f;
+}
+function graphSVG(){
+  const g=E.graph; if(!g)return'';
+  const k=g.groups.length, rows=Math.max(...g.groups.map(x=>x.items.length)), W=Math.max(340,k*176), RH=64, H=30+rows*RH;
+  const nw=o=>o.reqs.length>1?150:100, nh=o=>o.reqs.length>1?50:34;
+  const pos=(j,i,n)=>({x:W*(j+.5)/k, y:30+(rows-n)*RH/2+i*RH+RH/2-6});
+  const inAct=o=>g.active&&g.active.includes(o); let h='';
+  g.groups.forEach((gr,j)=>{ if(j===k-1)return; const nx=g.groups[j+1];
+    gr.items.forEach((o,i)=>nx.items.forEach((q,m)=>{ const a=pos(j,i,gr.items.length), b=pos(j+1,m,nx.items.length), on=inAct(o)&&inAct(q);
+      h+=`<line class="e ${on?(g.final?'fin':'act'):(g.final?'dim':'')}" x1="${a.x+nw(o)/2}" y1="${a.y}" x2="${b.x-nw(q)/2}" y2="${b.y}"/>`; })); });
+  g.groups.forEach((gr,j)=>{ h+=`<text x="${W*(j+.5)/k}" y="14">${esc(gr.name)}</text>`;
+    gr.items.forEach((o,i)=>{ const p=pos(j,i,gr.items.length), on=inAct(o), w=nw(o), ht=nh(o), b=o.reqs.length>1;
+      h+=`<g class="n ${b?'bundle ':''}${on?(g.final?'fin':'act'):(g.final?'dim':'')}"><rect x="${p.x-w/2}" y="${p.y-ht/2}" width="${w}" height="${ht}" rx="6"/>`
+        +(b?`<text x="${p.x}" y="${p.y-4}">${o.reqs.map(r=>r.L).join(' + ')} · ${num(o.cost)}</text><text class="sub" x="${p.x}" y="${p.y+13}">${esc(o.reqs.map(r=>r.target).join(' + '))} 묶음</text>`
+           :`<text x="${p.x}" y="${p.y+4.5}">${o.reqs[0].L} · ${num(o.cost)}</text>`)+`</g>`; }); });
+  return `<div class="graph"><svg viewBox="0 0 ${W} ${H}" style="max-width:${W*1.2}px" role="img" aria-label="집합 사이 조합 그래프">${h}</svg></div>`;
+}
+function askHTML(){ const q=E.ask; if(!q)return'';
+  return `<div class="ask" role="group" aria-label="예산 초과 처리 선택">
+    <div><b>${esc(q.o)}</b>(우선순위 ${q.p}, ${won(q.cost)})을 넣으면 누적 ${won(q.keep+q.cost)}으로 예산 ${won(q.budget)}을 넘습니다. 어떻게 할까요?</div>
+    <div class="acts"><button data-ans="hold">${esc(q.o)}만 잠재 작업으로 보내고 계속 진행</button><button data-ans="cut">여기서 자르기 (${esc(q.rest)}도 잠재 작업으로)</button></div>
+    <small>계속 진행하면 아래 우선순위 ${q.n}건을 남은 예산 ${won(q.budget-q.keep)}에 맞춰 봅니다.</small></div>`; }
+$('#engineBody').addEventListener('click',e=>{ const b=e.target.closest('[data-ans]'); if(b&&E.ask)E.ask.res(b.dataset.ans); });
+function renderEngine(){
+  const total=E.total??S.agents.length, n=E.buffer.length, full=n===total&&total>0;
+  $('#engineBody').innerHTML=`
+    <div class="buf${full?' full':''}">
+      <div class="box-head"><span class="zone-label">버퍼${E.recalc?" · 재계산 호출 (재탐색 결과 + 임시 공간)":""}</span><span>${n} / ${total}</span></div>
+      <div class="folders">${E.buffer.map(r=>folder(r,E.held&&E.held.includes(r)?'hold':E.picked&&E.picked.includes(r)?'pick':'')).join('')}</div>
+      ${n?'':`<p class="e-hint">${E.done?'처리 완료. → 방향키를 누르면 결제과정으로 넘어갑니다.':'1페이지에서 실행을 누르면 요청이 여기에 모이고, 모두 들어오면 엔진이 작동합니다.'}</p>`}
+    </div>
+    <ol class="steps">${STEPS.map((t,i)=>`<li class="${E.step===i?'on':(E.step>i||E.done)&&E.res[i]?'done':''}"><div class="ttl">${t}</div>${E.res[i]?`<div class="res">${esc(E.res[i])}</div>`:''}${i===3?graphSVG():''}${i===4?askHTML():''}</li>`).join('')}</ol>
+    <div class="trash">
+      <div class="box-head"><span class="zone-label">폐기함</span><span>${E.trash.length}건</span></div>
+      <div class="folders">${E.trash.map(t=>`<div class="fwrap">${folder(t.r,'bad')}<small>${esc(t.why)}</small></div>`).join('')}</div>
+      ${E.trash.length?'':'<p class="e-hint">버려진 요청이 사유와 함께 여기에 모입니다.</p>'}
+    </div>`;
+  draw();
+}
+const dueSum=()=>S.items.filter(i=>i.zone==='due').reduce((s,i)=>s+(i.amount||0),0);
+function discard(r,why,short){ E.buffer=E.buffer.filter(x=>x!==r); E.trash.push({r,why}); status(r.aid,'bad','폐기 · '+short); }
+
+async function runEngine(){
+  running=true; lock(true); await wait(500);
+  /* 1 예산 */
+  E.step=0; renderEngine(); await travel('w-read');
+  const bal=Math.max(0,Number($('#bal').value)||0), due=dueSum(), budget=bal-due;
+  E.res[0]=`잔액 ${num(bal)} − 결제 예정 ${num(due)} = 가용 예산 ${won(budget)}`; renderEngine(); await wait(700);
+  /* 2 목적, 3 수치 */
+  const checks=[[1,r=>!r.cat?['목적을 알 수 없음','목적']:!r.allow.includes(r.cat)?[`허가되지 않은 목적(${r.cat})`,'목적']:null],
+                [2,r=>!r.amount?['금액 없음','수치']:r.amount>budget?[`가용 예산 초과(${won(r.amount)})`,'수치']:null]];
+  for(const [si,test] of checks){
+    E.step=si; let cut=0;
+    for(const r of [...E.buffer]){ E.scan=[r.L]; renderEngine(); await wait(300);
+      const bad=test(r); if(bad){ discard(r,bad[0],bad[1]); cut++; renderEngine(); await wait(350); } }
+    E.scan=null; E.res[si]=`${cut}건 폐기 · ${E.buffer.length}건 통과`; renderEngine(); await wait(500);
+  }
+  /* 4 그룹화 + 최소 비용 조합 */
+  E.step=3; let best=[], bestC=[], sum=0;
+  if(E.buffer.length){
+    /* 집합 만들기: 독점적 목적은 요청 하나가 한 집합, 묶음 목적은 목적 단위, 나머지는 대상 단위 */
+    const map=new Map(); E.buffer.forEach(r=>{ const key=r.excl?'독립:'+r.L:BUNDLE[r.cat]?'묶음:'+r.cat:r.target; /* 독점적 목적은 혼자 한 집합 */ if(!map.has(key))map.set(key,[]); map.get(key).push(r); });
+    const groups=[...map.entries()].map(([key,rs])=>{
+      const parts=new Map(); rs.forEach(r=>{ if(!parts.has(r.target))parts.set(r.target,[]); parts.get(r.target).push(r); });
+      const bundle=key.startsWith('묶음:')&&parts.size>1;
+      /* 묶음이면 대상별로 하나씩 고른 것을 한 덩어리 선택지로 만든다 */
+      let opts=bundle?[[]]:rs.map(r=>[r]); if(bundle) parts.forEach(alts=>opts=opts.flatMap(c=>alts.map(r=>[...c,r])));
+      return {name:bundle?BUNDLE[rs[0].cat]+' 묶음':rs[0].target+(rs[0].excl?' 독립 집합':' 집합'), items:opts.map(reqs=>({reqs,cost:reqs.reduce((s,r)=>s+r.amount,0)}))};
+    });
+    let combos=[[]]; groups.forEach(g=>combos=combos.flatMap(c=>g.items.map(o=>[...c,o])));
+    const cost=c=>c.reduce((s,o)=>s+o.cost,0), lab=c=>c.map(o=>o.reqs.length>1?'('+o.reqs.map(r=>r.L).join('+')+')':o.reqs[0].L).join('+');
+    bestC=combos.reduce((b,c)=>cost(c)<cost(b)?c:b); best=bestC.flatMap(o=>o.reqs); sum=cost(bestC);
+    E.graph={groups,active:null,final:false}; E.res[3]=`${groups.length}개 집합으로 그룹화`; renderEngine(); await wait(800);
+    const show=combos.length<=12?combos:[...combos.slice(0,11),bestC];
+    for(const c of show){ E.graph.active=c; E.res[3]=`조합 ${lab(c)} = ${won(cost(c))}`; renderEngine(); await wait(420); }
+    E.graph.active=bestC; E.graph.final=true; E.picked=best;
+    E.res[3]=`${groups.length}개 집합 · ${num(combos.length)}개 조합 비교 → 최소 ${lab(bestC)} = ${won(sum)}`; renderEngine(); await wait(900);
+  } else { E.res[3]='남은 요청 없음'; renderEngine(); await wait(500); }
+  /* 5 등록 + 나머지 폐기 */
+  E.step=4; renderEngine();
+  for(const r of E.buffer.filter(r=>!best.includes(r))){ discard(r,'최소 비용 조합에서 제외','조합 제외'); renderEngine(); await wait(300); }
+  /* 우선순위 높은 순으로 예산에 채운다. 넘치는 품목이 나오면 사용자에게 묻는다 (묶음은 통째로) */
+  const pr=o=>Math.min(...o.reqs.map(r=>r.prio)), held=[], ol=o=>o.reqs.map(r=>r.L).join('+'); let keep=0, cutAt=null;
+  const order=[...bestC].sort((x,y)=>pr(x)-pr(y)||(x.reqs[0].L<y.reqs[0].L?-1:1)); E.picked=[]; E.held=held;
+  for(let i=0;i<order.length;i++){ const o=order[i], rest=order.slice(i+1);
+    E.scan=o.reqs.map(r=>r.L); renderEngine(); await wait(450);
+    if(keep+o.cost<=budget){ keep+=o.cost; E.picked.push(...o.reqs); E.res[4]=`우선순위 ${pr(o)} · ${ol(o)} ${won(o.cost)} 배정 → 누적 ${won(keep)} / 예산 ${won(budget)}`; renderEngine(); await wait(650); continue; }
+    let ans='hold';
+    if(rest.length){ ans=await new Promise(res=>{ E.ask={res,o:ol(o),p:pr(o),cost:o.cost,keep,budget,rest:rest.map(ol).join(', '),n:rest.reduce((s,x)=>s+x.reqs.length,0)}; renderEngine(); }); E.ask=null; }
+    held.push(...o.reqs);
+    if(ans==='cut'){ rest.forEach(x=>held.push(...x.reqs)); cutAt=ol(o); E.res[4]=`${ol(o)}에서 중단 → 아래 우선순위까지 잠재 작업 구역으로`; renderEngine(); await wait(900); break; }
+    E.res[4]=`${ol(o)} ${won(o.cost)} 예산 초과 → 잠재 작업 구역으로, 다음 우선순위 계속`; renderEngine(); await wait(900);
+  }
+  E.scan=null; const hl=held.map(r=>r.L).sort().join('+'); renderEngine();
+  let nd=0, nl=0;
+  if(best.length){ await travel('w-write');
+    bestC.forEach(o=>{ const over=held.includes(o.reqs[0]), zone=over?'latent':'due', bid=o.reqs.length>1?++S.n:null;
+      o.reqs.forEach(r=>{ zone==='due'?nd++:nl++;
+        S.items.push({id:++S.n,bid,bname:bid?BUNDLE[r.cat]+' 묶음':null,agent:r.agent+(over?' · 예산 초과로 보류':''),text:r.text,amount:r.amount,date:r.date,prio:r.prio,req:r,failSim:r.target==='기차표',zone,fresh:true});
+        status(r.aid,over?'bad':'done',zone==='due'?'결제 예정 등록':over?'잠재 작업 · 예산 초과':'잠재 작업 등록'); }); }); }
+  E.res[4]=best.length?`결제 예정 ${nd}건 (${won(keep)} ≤ 예산 ${won(budget)})`+(nl?` · 잠재 작업 ${nl}건`+(held.length?` (예산 초과로 보류: ${hl}${cutAt?', '+cutAt+'에서 중단':''})`:''):'')+` · 폐기 ${E.trash.length}건`:`등록할 요청 없음 · 폐기 ${E.trash.length}건`;
+  E.buffer=[]; E.picked=null; E.held=null; E.step=-1; E.done=true; renderEngine(); renderSched();
+  running=false; lock(false);
+}
+function lock(on){ ['#runAll','#reset','#add','#tab1','#tab2','#tab3'].forEach(s=>$(s).disabled=on); }
+
+/* ---------- 오른쪽: 스케줄러 ---------- */
+function itemHTML(i){
+  const open=openId===i.id; let detail='';
+  if(open){
+    if(i.zone==='due') detail=`<div class="detail"><div>판단 원문: “${esc(i.text)}”</div>
+      <div class="acts"><button data-act="hold" data-id="${i.id}">${i.bid?'묶음 전체를 ':''}잠재 작업으로 되돌리기</button><button data-act="del" data-id="${i.id}">삭제</button></div></div>`;
+    else detail=`<div class="detail"><div>판단 원문: “${esc(i.text)}”</div>
+      <div class="fields">
+        <label for="d${i.id}">결제일</label><input id="d${i.id}" type="date" min="${TODAY}" value="${i.date||''}"><small>비우면 당일</small>
+        <label for="m${i.id}">금액(만원)</label><input id="m${i.id}" type="number" min="1" value="${i.amount??''}">
+      </div><span class="err" id="ie${i.id}"></span>
+      <div class="acts"><button class="primary" data-act="confirm" data-id="${i.id}">${i.bid?'묶음 전체를 ':''}결제 예정으로 확정</button><button data-act="del" data-id="${i.id}">삭제</button></div></div>`;
+  }
+  const f=i.fresh; i.fresh=false;
+  return `<div class="item${f?' new':''}"><button data-open="${i.id}" aria-expanded="${open}">
+    <span class="d">${esc(dl(i.date)||(i.zone==='due'?'당일':'보류'))}</span>
+    <span class="t">${esc(i.text)}<span class="who">${esc(i.agent)}</span></span>
+    <span class="a">${i.amount?won(i.amount):'금액 미정'}</span></button>${detail}</div>`;
+}
+/* 묶음으로 등록된 항목은 한 테두리 안에 모아 그린다 */
+function listHTML(items){
+  const seen=new Set(); let h='';
+  items.forEach(i=>{ if(!i.bid){ h+=itemHTML(i); return; } if(seen.has(i.bid))return; seen.add(i.bid);
+    const g=items.filter(x=>x.bid===i.bid);
+    h+=g.length>1?`<div class="bundle"><div class="bundle-head"><span>${esc(i.bname)} · 함께만 결제</span><span class="sum">${g.length}건 · ${won(g.reduce((s,x)=>s+(x.amount||0),0))}</span></div>${g.map(itemHTML).join('')}</div>`:itemHTML(i); });
+  return h;
+}
+function renderSched(){
+  const due=S.items.filter(i=>i.zone==='due'), lat=S.items.filter(i=>i.zone==='latent');
+  $('#zoneDue').innerHTML=`<div class="sub-head"><h3>결제 예정 구역</h3><span class="sum">${due.length}건 · 합계 ${won(dueSum())}</span></div>
+    <p class="hint">기본은 당일 결제, 늦춰야 하는 결제만 날짜 표시</p>
+    ${listHTML(due)||'<div class="empty">예정된 결제가 없습니다.</div>'}${S.items.some(i=>i.zone==='paid')?`<div class="empty">결제 완료 ${S.items.filter(i=>i.zone==='paid').length}건은 결제과정 페이지에 표시됩니다.</div>`:''}`;
+  $('#zoneLatent').innerHTML=`<div class="sub-head"><h3>잠재 작업 구역</h3><span class="sum">${lat.length}건</span></div>
+    <p class="hint">아직 확정되지 않아 결제로 이어질 수 있는 작업</p>
+    ${listHTML(lat)||'<div class="empty">대기 중인 잠재 작업이 없습니다.</div>'}`;
+  draw();
+}
+$('#sched').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b||running)return;
+  if(b.dataset.open){ openId=openId==b.dataset.open?null:+b.dataset.open; return renderSched(); }
+  const i=S.items.find(x=>x.id==b.dataset.id); if(!i)return;
+  const grp=i.bid?S.items.filter(x=>x.bid===i.bid):[i];
+  if(b.dataset.act==='del') S.items=S.items.filter(x=>!grp.includes(x));
+  if(b.dataset.act==='hold') grp.forEach(x=>x.zone='latent');
+  if(b.dataset.act==='confirm'){
+    const d=$('#d'+i.id).value.trim(), m=Number($('#m'+i.id).value);
+    if(!(m>0)){ $('#ie'+i.id).textContent='금액을 입력하세요. 결제일을 비우면 당일 결제입니다.'; return; }
+    if(grp.some(x=>x!==i&&!x.amount)){ $('#ie'+i.id).textContent='묶음의 다른 요청에 금액이 없습니다.'; return; }
+    i.date=norm(d); i.amount=m; if(!i.prio)i.prio=2; grp.forEach(x=>{ x.zone='due'; x.fresh=true; });
+  }
+  openId=null; renderSched();
+});
+
+/* ---------- 3페이지: 결제과정 ---------- */
+let P=null;
+/* 재탐색 결과 예시: 대상별 대체 경로 이름과 금액 차이(만원) */
+const ALT={'기차표':['도착 후 고속버스',-2],'기차':['도착 후 고속버스',-2],'항공권':['다른 항공사 항공권',15],'항공':['다른 항공사 항공권',15],'노트북':['다른 판매처 노트북 대금',15],'클라우드':['다른 결제 수단으로 클라우드 이용료',5]};
+const bal=()=>Math.max(0,Number($('#bal').value)||0), setBal=v=>{ $('#bal').value=v; };
+function buildPay(){
+  P={rows:S.items.filter(i=>i.zone==='due'||i.zone==='paid')
+       .sort((a,b)=>(a.date||'').localeCompare(b.date||'')||(a.prio||1)-(b.prio||1)||a.id-b.id).map(it=>({it,st:it.zone==='paid'?'paid':'wait'})),
+     temp:[],failed:null,alt:null,phase:'idle',note:''};
+}
+const ST={wait:'대기',paying:'결제 중',paid:'결제 완료',fail:'결제 실패',cancel:'결제 취소',temp:'임시 공간으로 이동'};
+const short=i=>`${i.req?i.req.L+' ':''}${(i.req&&i.req.target)||i.text.slice(0,6)} ${num(i.amount||0)}`;
+function payRow(r,n){ const i=r.it;
+  return `<div class="prow st-${r.st}"><span class="ord">${n}</span><span class="d">${esc(dl(i.date)||'당일')}</span>
+    <span class="t">${esc(i.text)}<span class="who">${esc(i.agent)} · 우선순위 ${i.prio||1}</span></span><span class="a">${won(i.amount||0)}</span>
+    <span class="foot"><span class="chip">${ST[r.st]}${r.refund?' · 환불':''}</span>
+    ${P.phase==='idle'&&r.st==='wait'?`<label class="failt" for="f${i.id}"><input type="checkbox" id="f${i.id}" data-fail="${i.id}"${i.failSim?' checked':''}>실패 가정</label>`:''}</span></div>`; }
+function renderPay(){
+  if(!P)return; let h='', k=0; const R=P.rows;
+  while(k<R.length){ const bid=R[k].it.bid; let j=k+1; if(bid) while(j<R.length&&R[j].it.bid===bid)j++;
+    const part=R.slice(k,j).map((x,m)=>payRow(x,k+m+1)).join('');
+    h+=j-k>1?`<div class="bundle"><div class="bundle-head"><span>${esc(R[k].it.bname)} · 함께만 결제</span></div>${part}</div>`:part; k=j; }
+  const lat=S.items.filter(i=>i.zone==='latent');
+  $('#payDue').innerHTML=`<div class="sub-head"><h3>결제 예정 구역</h3><span class="sum">${R.length}건</span></div>
+    <p class="hint">위에서부터 차례로 결제합니다.</p>${h||'<div class="empty">결제할 항목이 없습니다. 2페이지에서 엔진을 먼저 돌리세요.</div>'}`;
+  $('#payLatent').innerHTML=`<div class="sub-head"><h3>잠재 작업 구역</h3><span class="sum">${lat.length}건</span></div>
+    <p class="hint">결제하지 않고 그대로 둡니다.</p>${lat.map(i=>`<div class="prow"><span class="ord"></span><span class="d">보류</span><span class="t">${esc(i.text)}<span class="who">${esc(i.agent)}</span></span><span class="a">${i.amount?won(i.amount):'금액 미정'}</span></div>`).join('')||'<div class="empty">없음</div>'}`;
+  $('#pbal').textContent=won(bal());
+  const t=P.temp, a=P.alt, ready=P.phase==='failed'&&a&&a.req, rest=t.filter(i=>i!==P.failed);
+  $('#payFlow').innerHTML=`
+    <div class="pbox${t.length?' on':''}"><div class="ttl">임시 공간</div>
+      ${t.length?`<div class="chips">${t.map(i=>`<span class="tchip${i===P.failed?' bad':''}">${esc(short(i))}</span>`).join('')}</div><p>${esc(P.note)}</p>`
+        :'<p class="muted">묶음 안의 결제가 하나라도 실패하면 묶음의 나머지 결제도 취소하고, 그 묶음과 그보다 우선순위가 낮은 추가 결제를 여기로 뺍니다.</p>'}</div>
+    <div class="parrow" aria-hidden="true">↓</div>
+    <div class="pbox${a?' on':''}"><div class="ttl">에이전트 재탐색 호출</div>
+      ${a?`<p><b>${esc(a.agent)}</b>에게 재탐색을 요청했습니다.</p><p class="blocked">막은 경로: <s>${esc(P.failed.text)}</s> (결제 실패)</p>${a.req?`<p class="found">재탐색 결과: ${esc(a.req.text)}</p>`:'<p class="muted">다른 경로를 찾는 중…</p>'}`
+        :'<p class="muted">실패한 결제 경로를 막은 상태로, 그 결제를 요청한 에이전트에게 다른 경로를 찾게 합니다.</p>'}</div>
+    <div class="parrow" aria-hidden="true">↓</div>
+    <div class="pbox${ready?' on':''}"><div class="ttl">프로그램 엔진 재계산 호출</div>
+      ${ready?`<p>입력: 재탐색 결과 1건 + 임시 공간 ${rest.length}건</p><div class="chips"><span class="tchip new">${esc(a.req.L+' '+(a.req.target||'')+' '+num(a.req.amount||0))}</span>${rest.map(i=>`<span class="tchip">${esc(short(i))}</span>`).join('')}</div><button class="primary" id="recalc">프로그램 엔진 재계산 호출 →</button>`
+        :'<p class="muted">재탐색 결과와 임시 공간을 입력으로 2페이지의 프로그램 엔진을 다시 돌립니다.</p>'}</div>`;
+  $('#payRun').disabled=running||P.phase!=='idle'||!R.some(r=>r.st==='wait');
+}
+$('#page3').addEventListener('change',e=>{ const id=e.target.dataset.fail; if(id){ const i=S.items.find(x=>x.id==id); if(i)i.failSim=e.target.checked; } });
+$('#page3').addEventListener('click',e=>{
+  if(e.target.id!=='recalc'||running||!P||!P.alt||!P.alt.req)return;
+  startEngine([P.alt.req,...P.temp.filter(i=>i!==P.failed).map(i=>i.req)],true);
+});
+$('#payRun').onclick=async()=>{
+  if(running||!P||P.phase!=='idle')return; running=true; lock(true); P.phase='run'; renderPay();
+  for(const r of P.rows){ if(r.st!=='wait')continue;
+    r.st='paying'; renderPay(); await wait(700);
+    if(r.it.failSim){ r.st='fail'; renderPay(); await wait(900); await failFlow(r); running=false; lock(false); renderPay(); renderSched(); return; }
+    r.st='paid'; r.it.zone='paid'; setBal(bal()-r.it.amount); renderPay(); await wait(350);
+  }
+  P.phase='done'; running=false; lock(false); renderPay(); renderSched();
+};
+async function failFlow(fr){
+  const f=fr.it; P.failed=f;
+  /* 1) 같은 묶음의 나머지 결제 취소 (이미 결제된 것은 환불) */
+  const grp=P.rows.filter(r=>f.bid?r.it.bid===f.bid:r===fr);
+  grp.forEach(r=>{ if(r===fr)return; if(r.st==='paid'){ setBal(bal()+r.it.amount); r.refund=true; } r.st='cancel'; });
+  renderPay(); await wait(1100);
+  /* 2) 묶음 + 더 낮은 우선순위의 추가 결제를 임시 공간으로 */
+  const bp=Math.min(...grp.map(r=>r.it.prio||1)), low=P.rows.filter(r=>r.st==='wait'&&r.it.req&&(r.it.prio||1)>bp), moved=[...grp,...low];
+  moved.forEach(r=>{ r.st='temp'; }); P.temp=moved.map(r=>r.it); S.items=S.items.filter(i=>!P.temp.includes(i));
+  P.note=`실패한 결제${grp.length>1?'가 속한 '+f.bname+' '+grp.length+'건':' 1건'}`+(low.length?`과 우선순위가 더 낮은 추가 결제 ${low.length}건`:'')+'을 스케줄러에서 뺐습니다.';
+  renderPay(); await wait(1100);
+  /* 3) 실패 경로를 막고 에이전트에게 재탐색 호출 */
+  const base=f.req||{aid:null,agent:f.agent,allow:[parse(f.text).cat],L:'R',prio:f.prio||1,...parse(f.text),date:f.date,amount:f.amount};
+  P.alt={agent:base.agent,req:null}; renderPay(); await wait(1500);
+  const al=ALT[base.target], text=al?`${al[0]} ${num(Math.max(1,f.amount+al[1]))}만원 결제 필요`:`대체 경로로 ${f.text}`;
+  P.alt.req={...base,L:base.L.replace(/′+$/,'')+'′',text,...parse(text)}; P.phase='failed';
+}
+
+/* ---------- 연결선 ---------- */
+const stage=$('#stage'), svg=$('#wires'); let flying=0, dirty=false;
+const narrow=()=>getComputedStyle(svg).display==='none';
+function draw(){
+  if(stage.hidden||narrow())return; if(flying){dirty=true;return;} dirty=false;
+  const s=stage.getBoundingClientRect(), cl=(v,a,b)=>Math.min(Math.max(v,a),Math.max(a,b));
+  const P=(el,side,fy=.5)=>{const r=el.getBoundingClientRect();return{x:(side==='l'?r.left:r.right)-s.left,y:r.top-s.top+r.height*fy,t:r.top-s.top,b:r.bottom-s.top}};
+  const eng=$('#engine'), sch=$('#sched'), buf=eng.querySelector('.buf'), lis=eng.querySelectorAll('.steps li'); if(!buf)return;
+  let h='<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>';
+  const er=P(eng,'r'), sl=P(sch,'l'), cx=(er.x+sl.x)/2;
+  const y1=cl(P(lis[0],'l').y,sl.t+24,sl.b-60), y2=Math.max(y1+40,cl(P(lis[4],'l').y,sl.t+24,sl.b-24));
+  h+=`<path id="w-read" marker-end="url(#ah)" d="M${sl.x-4} ${y1}L${er.x+3} ${y1}"/><text x="${cx}" y="${y1-9}">입력</text>`;
+  h+=`<path id="w-write" marker-end="url(#ah)" d="M${er.x+4} ${y2}L${sl.x-3} ${y2}"/><text x="${cx}" y="${y2+20}">출력</text>`;
+  svg.innerHTML=h;
+}
+new ResizeObserver(draw).observe(stage);
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(draw);
+
+function travel(id,ms=600){
+  const p=document.getElementById(id);
+  if(!p||narrow()||reduced) return wait(220);
+  return new Promise(res=>{
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle'); c.setAttribute('r',6); svg.appendChild(c);
+    p.classList.add('on'); flying++; const len=p.getTotalLength(), t0=performance.now();
+    (function f(t){ const k=Math.min(1,Math.max(0,(t-t0)/ms)), q=p.getPointAtLength(len*(k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2));
+      c.setAttribute('cx',q.x); c.setAttribute('cy',q.y);
+      if(k<1) requestAnimationFrame(f); else { c.remove(); p.classList.remove('on'); flying--; if(!flying&&dirty)draw(); res(); } })(t0);
+  });
+}
+
+renderLanes(); renderEngine(); renderSched();
+</script>
+
+</body></html>
